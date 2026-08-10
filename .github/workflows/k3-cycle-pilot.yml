@@ -1,0 +1,58 @@
+name: K3 omitted-cycle pilot
+
+on:
+  push:
+    branches: [agent/whest-research]
+    paths:
+      - "research/k3_cycle_pilot.py"
+      - ".github/workflows/k3-cycle-pilot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+  OMP_NUM_THREADS: "4"
+  OPENBLAS_NUM_THREADS: "4"
+  MKL_NUM_THREADS: "4"
+  NUMEXPR_NUM_THREADS: "4"
+  HF_HUB_DISABLE_TELEMETRY: "1"
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact current grader stack and data client
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "whestbench==0.14.0" "flopscope==0.10.0" "huggingface_hub[hf_xet]>=0.34"
+          python - <<'PY'
+          import importlib.metadata as m
+          print("whestbench", m.version("whestbench"))
+          print("flopscope", m.version("flopscope"))
+          print("numpy", m.version("numpy"))
+          print("huggingface_hub", m.version("huggingface_hub"))
+          PY
+      - name: Fetch reproducibility library
+        run: |
+          git clone --depth 1 --branch claude/arc-white-box-estimation-7lrhou \
+            https://github.com/ChukwumaChukwuma/aicrowd.git /tmp/aicrowd
+      - name: Run held-out higher-moment experiment
+        run: |
+          /usr/bin/time -v python research/k3_cycle_pilot.py \
+            --n 12 --train 9 --out k3-cycle-out 2>&1 | tee k3-cycle.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k3-cycle-pilot
+          path: |
+            k3-cycle-out/
+            k3-cycle.log
+          if-no-files-found: warn
