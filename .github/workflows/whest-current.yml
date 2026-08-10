@@ -1,0 +1,74 @@
+name: Exact-current WhestBench benchmark
+
+on:
+  push:
+    branches: [agent/whest-research]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+  WHEST_SKIP_HARDWARE_FALLBACK_PROBES: "1"
+  OMP_NUM_THREADS: "4"
+  OPENBLAS_NUM_THREADS: "4"
+  MKL_NUM_THREADS: "4"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact stable grader stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "whestbench==0.14.0" "flopscope==0.10.0"
+          whest version --json | tee whest-version.json
+          python - <<'PY' | tee package-versions.txt
+          import importlib.metadata as md
+          print("whestbench", md.version("whestbench"))
+          print("flopscope", md.version("flopscope"))
+          PY
+      - name: Fetch official starter and public K3
+        run: |
+          git clone --depth 1 https://github.com/AIcrowd/whest-starterkit.git /tmp/whest-starterkit
+          mkdir -p /tmp/public-k3
+          curl -L --fail --retry 3 \
+            https://raw.githubusercontent.com/ascender1729/whestbench-cumulant-propagation/master/estimator.py \
+            -o /tmp/public-k3/estimator.py
+      - name: Validate candidates
+        run: |
+          whest validate --estimator /tmp/whest-starterkit/examples/03_covariance_propagation.py --format json | tee validate-cov.json
+          whest validate --estimator /tmp/public-k3/estimator.py --format json | tee validate-k3.json
+      - name: Score official covariance baseline on current public Mini
+        continue-on-error: true
+        run: |
+          whest run \
+            --estimator /tmp/whest-starterkit/examples/03_covariance_propagation.py \
+            --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1 \
+            --split mini --n-mlps 2 --runner local --max-threads 4 \
+            --format json | tee result-cov.json
+      - name: Score public K3 baseline on current public Mini
+        continue-on-error: true
+        run: |
+          whest run \
+            --estimator /tmp/public-k3/estimator.py \
+            --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1 \
+            --split mini --n-mlps 2 --runner local --max-threads 4 \
+            --format json | tee result-k3.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-current-results
+          path: |
+            whest-version.json
+            package-versions.txt
+            validate-*.json
+            result-*.json
+          if-no-files-found: warn
