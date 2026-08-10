@@ -4,6 +4,8 @@ on:
   push:
     branches: [agent/whest-research]
   workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
